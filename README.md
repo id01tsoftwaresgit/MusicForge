@@ -5,7 +5,7 @@
 **Website:** [https://www.id01t.ca](https://www.id01t.ca)
 **Support:** [itechinfomtl@gmail.com](mailto:itechinfomtl@gmail.com)
 
-Music Forge is a **store-ready, professional-grade audio batch processor** with a modern dark UI. Built for Windows with full FFmpeg integration, it compiles and processes audio locally — ensuring **speed, quality, and privacy**.
+Music Forge is a **store-ready, professional-grade audio batch processor** with a modern dark UI. Built for Windows with full FFmpeg integration, it compiles and processes audio locally, ensuring **speed, quality, and privacy**.
 
 ---
 
