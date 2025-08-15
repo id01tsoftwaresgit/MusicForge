@@ -1,4 +1,5 @@
-# 🎵 Music Forge — Professional Audio Compiler & Processor
+# 🎵 Music Forge
+Professional Audio Compiler & Processor
 
 **Version:** 1.1.5
 **Developer:** Guillaume Lessard — iD01t Productions
