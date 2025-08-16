@@ -48,6 +48,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 from mutagen import File
 from tkinterdnd2 import DND_FILES, TkinterDnD
+import pygame
 
 APP_INFO = {
     "name": "Music Forge",
@@ -185,6 +186,21 @@ class MusicForgePro:
         self.progress_var = tk.DoubleVar(value=0.0)
         self.count_var = tk.StringVar(value="0 files")
         self.status_var = tk.StringVar(value="Ready — Add audio files to begin")
+
+        # Player state
+        self.player_track_var = tk.StringVar(value="No track selected")
+        self.player_time_var = tk.StringVar(value="00:00 / 00:00")
+        self.player_slider_var = tk.DoubleVar(value=0)
+        self.is_playing = False
+        self.selected_track_path = None
+        self.track_length_sec = 0
+        self.seeking = False
+
+        # Init Pygame Mixer
+        try:
+            pygame.mixer.init()
+        except Exception as e:
+            self.log(f"Could not initialize audio player: {e}", "error")
 
         # Presets
         self.default_presets = {
@@ -353,6 +369,7 @@ class MusicForgePro:
         vsb = ttk.Scrollbar(main, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
         self.tree.bind("<Double-1>", self._open_tag_editor)
+        self.tree.bind("<<TreeviewSelect>>", self._on_track_select)
         self.tree.drop_target_register(DND_FILES)
         self.tree.dnd_bind('<<Drop>>', self._on_drop)
         self.tree.grid(row=1, column=0, sticky="nsew")
@@ -368,6 +385,29 @@ class MusicForgePro:
         self.progress_label.grid(row=0, column=1, padx=(10,0))
         self.process_btn = ttk.Button(footer, text="🚀 Compile Music", command=self._start_processing, style="Accent.TButton", width=25)
         self.process_btn.grid(row=0, column=2, padx=(12,0))
+
+        # Player
+        player = ttk.LabelFrame(self.root, text="▶️ Music Player", padding=12)
+        player.pack(fill="x", padx=16, pady=(10,0))
+        player.columnconfigure(1, weight=1)
+
+        self.player_track_label = ttk.Label(player, textvariable=self.player_track_var, font=("Segoe UI", 10, "bold"))
+        self.player_track_label.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0,5))
+
+        self.player_time_label = ttk.Label(player, textvariable=self.player_time_var, font=("Segoe UI", 9))
+        self.player_time_label.grid(row=1, column=2, sticky="e")
+
+        self.player_slider = ttk.Scale(player, variable=self.player_slider_var, from_=0, to=100)
+        self.player_slider.bind("<ButtonPress-1>", self._start_seek)
+        self.player_slider.bind("<ButtonRelease-1>", self._end_seek)
+        self.player_slider.grid(row=1, column=1, sticky="ew", padx=10)
+
+        player_btns = ttk.Frame(player)
+        player_btns.grid(row=1, column=0)
+        self.play_btn = ttk.Button(player_btns, text="▶ Play", width=8, command=self._play_pause_track)
+        self.play_btn.pack(side="left")
+        self.stop_btn = ttk.Button(player_btns, text="⏹ Stop", width=8, command=self._stop_track)
+        self.stop_btn.pack(side="left", padx=5)
 
         # Logs
         logs = ttk.LabelFrame(self.root, text="Activity Log", padding=12)
@@ -526,6 +566,99 @@ class MusicForgePro:
             ext, size_mb, str(p)
         ))
         self.log(f"Updated tags for {p.name}")
+
+    # ----- Player -----
+    def _format_time(self, seconds):
+        m, s = divmod(int(seconds), 60)
+        return f"{m:02d}:{s:02d}"
+
+    def _update_player_progress(self):
+        if pygame.mixer.music.get_busy() and not self.seeking:
+            current_time = pygame.mixer.music.get_pos() / 1000
+            self.player_slider_var.set(current_time)
+
+            time_str = f"{self._format_time(current_time)} / {self._format_time(self.track_length_sec)}"
+            self.player_time_var.set(time_str)
+
+        if self.is_playing:
+            self.root.after(500, self._update_player_progress)
+
+    def _on_track_select(self, event=None):
+        selected_ids = self.tree.selection()
+        if not selected_ids:
+            return
+
+        item_id = selected_ids[0]
+        file_item = next((item for item in self.file_queue if item["id"] == item_id), None)
+
+        if file_item and file_item["path"] != self.selected_track_path:
+            self._stop_track()
+            try:
+                sound = pygame.mixer.Sound(file_item["path"])
+                self.track_length_sec = sound.get_length()
+                self.player_slider.config(to=self.track_length_sec)
+                self.selected_track_path = file_item["path"]
+                self.player_track_var.set(Path(self.selected_track_path).name)
+                self.player_time_var.set(f"00:00 / {self._format_time(self.track_length_sec)}")
+                self.log(f"Player loaded: {self.player_track_var.get()}")
+            except Exception as e:
+                self.log(f"Player error loading sound: {e}", "error")
+                messagebox.showerror("Player Error", f"Could not load file:\n{e}", parent=self.root)
+
+
+    def _play_pause_track(self):
+        if not self.selected_track_path:
+            messagebox.showinfo("No Track", "Please select a track from the queue to play.", parent=self.root)
+            return
+
+        try:
+            if not pygame.mixer.music.get_busy() and not self.is_playing: # Not playing, so start
+                pygame.mixer.music.load(self.selected_track_path)
+                pygame.mixer.music.play()
+                self.play_btn.configure(text="⏸ Pause")
+                self.is_playing = True
+                self.log(f"Playing: {self.player_track_var.get()}")
+                self._update_player_progress() # Start the update loop
+            elif self.is_playing: # Playing, so pause
+                pygame.mixer.music.pause()
+                self.play_btn.configure(text="▶ Play")
+                self.is_playing = False
+                self.log("Player paused.")
+            else: # Paused, so unpause
+                pygame.mixer.music.unpause()
+                self.play_btn.configure(text="⏸ Pause")
+                self.is_playing = True
+                self.log("Player resumed.")
+                self._update_player_progress() # Resume the update loop
+        except Exception as e:
+            self.log(f"Player error: {e}", "error")
+            messagebox.showerror("Player Error", f"Could not play file:\n{e}", parent=self.root)
+
+    def _start_seek(self, event=None):
+        self.seeking = True
+
+    def _end_seek(self, event=None):
+        self.seeking = False
+        self._seek_track()
+
+    def _seek_track(self):
+        if self.selected_track_path:
+            pos = self.player_slider_var.get()
+            pygame.mixer.music.play(start=pos)
+            # Instantly update time display after seek
+            time_str = f"{self._format_time(pos)} / {self._format_time(self.track_length_sec)}"
+            self.player_time_var.set(time_str)
+
+    def _stop_track(self):
+        pygame.mixer.music.stop()
+        self.play_btn.configure(text="▶ Play")
+        self.is_playing = False
+        self.player_track_var.set("No track selected")
+        self.player_time_var.set("00:00 / 00:00")
+        self.player_slider_var.set(0)
+        self.selected_track_path = None
+        self.track_length_sec = 0
+        self.log("Player stopped.")
 
     # ----- Helpers -----
     def _on_drop(self, event):

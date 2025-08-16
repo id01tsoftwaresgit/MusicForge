@@ -2,3 +2,4 @@ pillow
 ttkbootstrap
 mutagen
 tkinterdnd2
+pygame
