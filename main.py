@@ -68,6 +68,7 @@ BASE_DIR = _base_dir()
 # Preferred assets folder name (ship it with --add-data "assets_music_forge;assets_music_forge")
 ASSETS_DIR = BASE_DIR / "assets_music_forge"
 CUSTOM_PRESETS_FILE = BASE_DIR / "presets.json"
+CONFIG_FILE = BASE_DIR / "config.json"
 
 # Candidate icon locations
 def _find_icon_candidates():
@@ -159,9 +160,10 @@ class MusicForgePro:
         # Force dark UI
         if tb:
             self.root = TkinterDnD.Tk() # Use DND-aware Tk root
-            tb.Style(theme="darkly").configure_ttk_widgets()
+            self.style = tb.Style()
         else:
             self.root = TkinterDnD.Tk()
+            self.style = ttk.Style()
 
         self.root.title("Music Forge — Audio Compiler & Processor")
         self.root.geometry("1100x720")
@@ -193,12 +195,14 @@ class MusicForgePro:
         }
         self.custom_presets = {}
         self.current_preset = tk.StringVar(value="High MP3")
+        self.theme_var = tk.StringVar(value="darkly")
 
         # Background worker
         self.worker = Worker(self); self.worker.start()
 
-        # Build dark UI
+        # Build UI and load settings
         self._build_layout()
+        self._load_config() # This will set the theme
         self._load_presets()
         self._apply_preset("High MP3")
         self._check_ffmpeg()
@@ -232,6 +236,26 @@ class MusicForgePro:
         top.pack(fill="x")
         ttk.Label(top, text="🎵  Music Forge", font=("Segoe UI Variable", 22, "bold")).pack(side="left")
         ttk.Label(top, text="Professional Audio Compiler", font=("Segoe UI", 11)).pack(side="left", padx=(10, 0))
+
+        # Theme menu
+        theme_menu_btn = ttk.Menubutton(top, text="Theme")
+        theme_menu_btn.pack(side="right", padx=(8,0))
+        theme_menu = tk.Menu(theme_menu_btn, tearoff=0)
+        theme_menu_btn["menu"] = theme_menu
+
+        light_themes = ['cosmo', 'flatly', 'journal', 'litera', 'lumen', 'minty', 'pulse', 'sandstone', 'united', 'yeti']
+        dark_themes = ['cyborg', 'darkly', 'solar', 'superhero']
+
+        light_menu = tk.Menu(theme_menu, tearoff=0)
+        dark_menu = tk.Menu(theme_menu, tearoff=0)
+        theme_menu.add_cascade(label="Light Themes", menu=light_menu)
+        theme_menu.add_cascade(label="Dark Themes", menu=dark_menu)
+
+        for theme in light_themes:
+            light_menu.add_radiobutton(label=theme, variable=self.theme_var, value=theme, command=self._change_theme)
+        for theme in dark_themes:
+            dark_menu.add_radiobutton(label=theme, variable=self.theme_var, value=theme, command=self._change_theme)
+
         ttk.Button(top, text="About", command=self._show_about).pack(side="right", padx=(8,0))
         ttk.Button(top, text="Help", command=self._show_help).pack(side="right")
 
@@ -442,6 +466,32 @@ class MusicForgePro:
         self.channels.set(p["channels"])
         self.current_preset.set(name)
         self.log(f"Preset applied: {name}")
+
+    # ----- Theming -----
+    def _load_config(self):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                config = json.load(f)
+                self.theme_var.set(config.get("theme", "darkly"))
+        except (IOError, json.JSONDecodeError):
+            self.theme_var.set("darkly") # Default theme
+
+        self.style.theme_use(self.theme_var.get())
+        self.log(f"Theme '{self.theme_var.get()}' loaded.")
+
+    def _save_config(self):
+        config = {"theme": self.theme_var.get()}
+        try:
+            with open(CONFIG_FILE, "w") as f:
+                json.dump(config, f, indent=4)
+        except IOError:
+            self.log("Error saving config file.", "error")
+
+    def _change_theme(self):
+        theme = self.theme_var.get()
+        self.style.theme_use(theme)
+        self.log(f"Theme changed to '{theme}'")
+        self._save_config()
 
     # ----- Tag Editing -----
     def _open_tag_editor(self, event=None):
