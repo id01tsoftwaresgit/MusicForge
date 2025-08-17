@@ -537,35 +537,32 @@ class MusicForgePro:
     def _open_tag_editor(self, event=None):
         selected_ids = self.tree.selection()
         if not selected_ids:
-            messagebox.showinfo("No Selection", "Please select a file in the queue to edit its tags.", parent=self.root)
-            return
-        if len(selected_ids) > 1:
-            messagebox.showinfo("Multiple Selection", "Please select only one file at a time to edit tags.", parent=self.root)
+            messagebox.showinfo("No Selection", "Please select one or more files to edit.", parent=self.root)
             return
 
-        item_id = selected_ids[0]
-        file_item = next((item for item in self.file_queue if item["id"] == item_id), None)
+        file_items = [item for item in self.file_queue if item["id"] in selected_ids]
 
-        if file_item:
-            TagEditorWindow(self.root, file_item, self._update_tags_for_item)
+        if file_items:
+            TagEditorWindow(self.root, file_items, self._update_tags_for_items)
 
-    def _update_tags_for_item(self, item_id, new_tags):
-        # Update the data model
-        file_item = next((item for item in self.file_queue if item["id"] == item_id), None)
-        if not file_item: return
-        file_item["tags"] = new_tags
+    def _update_tags_for_items(self, file_items, new_tags_to_apply):
+        for item in file_items:
+            # Update the data model
+            for key, value in new_tags_to_apply.items():
+                item["tags"][key] = value
 
-        # Update the treeview
-        p = Path(file_item["path"])
-        size = p.stat().st_size if p.exists() else 0
-        size_mb = f"{size/1024/1024:.2f} MB"
-        ext = p.suffix.lower().replace('.', '').upper()
+            # Update the treeview
+            p = Path(item["path"])
+            size = p.stat().st_size if p.exists() else 0
+            size_mb = f"{size/1024/1024:.2f} MB"
+            ext = p.suffix.lower().replace('.', '').upper()
 
-        self.tree.item(item_id, values=(
-            p.name, new_tags.get('title',''), new_tags.get('artist',''), new_tags.get('album',''),
-            ext, size_mb, str(p)
-        ))
-        self.log(f"Updated tags for {p.name}")
+            self.tree.item(item["id"], values=(
+                p.name, item["tags"].get('title',''), item["tags"].get('artist',''), item["tags"].get('album',''),
+                ext, size_mb, str(p)
+            ))
+
+        self.log(f"Updated tags for {len(file_items)} item(s).")
 
     # ----- Player -----
     def _format_time(self, seconds):
@@ -905,46 +902,74 @@ class MusicForgePro:
 
 # ---------- Tag Editor Window ----------
 class TagEditorWindow(tk.Toplevel):
-    def __init__(self, parent, file_item, callback):
+    def __init__(self, parent, file_items, callback):
         super().__init__(parent)
         self.transient(parent)
         self.grab_set()
-        self.title("Edit Tags")
-        self.geometry("400x200")
+        self.title(f"Edit Tags for {len(file_items)} Item(s)")
+        self.geometry("450x230")
         self.resizable(False, False)
 
-        self.item_id = file_item["id"]
-        self.tags = file_item["tags"].copy()
+        self.file_items = file_items
         self.callback = callback
 
-        # UI Elements
+        # --- Determine initial values ---
+        def get_common_value(tag_name):
+            first_value = self.file_items[0]["tags"].get(tag_name, "")
+            if all(item["tags"].get(tag_name, "") == first_value for item in self.file_items):
+                return first_value
+            return "[Multiple Values]"
+
+        initial_title = get_common_value("title")
+        initial_artist = get_common_value("artist")
+        initial_album = get_common_value("album")
+
+        # --- UI Elements ---
         frame = ttk.Frame(self, padding=15)
         frame.pack(fill="both", expand=True)
+        frame.columnconfigure(2, weight=1)
 
-        ttk.Label(frame, text="Title:").grid(row=0, column=0, sticky="w", pady=5)
-        self.title_var = tk.StringVar(value=self.tags.get("title", ""))
-        ttk.Entry(frame, textvariable=self.title_var).grid(row=0, column=1, sticky="ew", pady=5)
+        # Checkboxes
+        self.apply_title = tk.BooleanVar()
+        self.apply_artist = tk.BooleanVar()
+        self.apply_album = tk.BooleanVar()
+        ttk.Checkbutton(frame, variable=self.apply_title).grid(row=0, column=0, sticky="w", padx=(0,5))
+        ttk.Checkbutton(frame, variable=self.apply_artist).grid(row=1, column=0, sticky="w", padx=(0,5))
+        ttk.Checkbutton(frame, variable=self.apply_album).grid(row=2, column=0, sticky="w", padx=(0,5))
 
-        ttk.Label(frame, text="Artist:").grid(row=1, column=0, sticky="w", pady=5)
-        self.artist_var = tk.StringVar(value=self.tags.get("artist", ""))
-        ttk.Entry(frame, textvariable=self.artist_var).grid(row=1, column=1, sticky="ew", pady=5)
+        # Labels
+        ttk.Label(frame, text="Title:").grid(row=0, column=1, sticky="w", pady=5)
+        ttk.Label(frame, text="Artist:").grid(row=1, column=1, sticky="w", pady=5)
+        ttk.Label(frame, text="Album:").grid(row=2, column=1, sticky="w", pady=5)
 
-        ttk.Label(frame, text="Album:").grid(row=2, column=0, sticky="w", pady=5)
-        self.album_var = tk.StringVar(value=self.tags.get("album", ""))
-        ttk.Entry(frame, textvariable=self.album_var).grid(row=2, column=1, sticky="ew", pady=5)
+        # Entries
+        self.title_var = tk.StringVar(value=initial_title)
+        ttk.Entry(frame, textvariable=self.title_var).grid(row=0, column=2, sticky="ew", pady=5)
+        self.artist_var = tk.StringVar(value=initial_artist)
+        ttk.Entry(frame, textvariable=self.artist_var).grid(row=1, column=2, sticky="ew", pady=5)
+        self.album_var = tk.StringVar(value=initial_album)
+        ttk.Entry(frame, textvariable=self.album_var).grid(row=2, column=2, sticky="ew", pady=5)
 
-        frame.columnconfigure(1, weight=1)
+        ttk.Label(frame, text="Check boxes to apply changes.", font=("Segoe UI", 8)).grid(row=3, column=1, columnspan=2, sticky="w", pady=(10,0))
 
+        # --- Buttons ---
         btn_frame = ttk.Frame(self, padding=(0, 0, 15, 15))
         btn_frame.pack(fill="x")
         ttk.Button(btn_frame, text="Save", command=self.save, style="Accent.TButton").pack(side="right")
         ttk.Button(btn_frame, text="Cancel", command=self.destroy).pack(side="right", padx=10)
 
     def save(self):
-        self.tags["title"] = self.title_var.get()
-        self.tags["artist"] = self.artist_var.get()
-        self.tags["album"] = self.album_var.get()
-        self.callback(self.item_id, self.tags)
+        tags_to_apply = {}
+        if self.apply_title.get():
+            tags_to_apply["title"] = self.title_var.get()
+        if self.apply_artist.get():
+            tags_to_apply["artist"] = self.artist_var.get()
+        if self.apply_album.get():
+            tags_to_apply["album"] = self.album_var.get()
+
+        if tags_to_apply:
+            self.callback(self.file_items, tags_to_apply)
+
         self.destroy()
 
 def main():
